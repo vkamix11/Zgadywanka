@@ -1356,6 +1356,8 @@ function redrawFromOffscreen(){
 }
 
 function setupCanvas(){
+  startLiveRaf();
+  startSenderLoop();
   canvas.addEventListener('mousedown',e=>{
     if(!isDrawer) return;
     if(selTool==='fill'){
@@ -1414,7 +1416,7 @@ function setupCanvas(){
     const live=s.val();
     if(!live){
       liveAccumPts=[];
-      ctx.drawImage(offscreen,0,0);
+      liveDirty=true;
       return;
     }
     // nowa kreska — resetuj akumulator
@@ -1428,15 +1430,14 @@ function setupCanvas(){
     if(live.delta && live.delta.length>0){
       liveAccumPts.push(...live.delta);
     }
-    // przerysuj: ukończone kreski + akumulowana live kreska
-    ctx.drawImage(offscreen,0,0);
-    if(liveAccumPts.length>1){
-      drawStrokeToCtx(ctx,{color:liveAccumColor,size:liveAccumSize,points:liveAccumPts});
-    }
+    liveDirty=true;
   });
 }
 
 function resetCanvas(){
+  stopLiveRaf();
+  stopSenderLoop();
+  liveAccumPts=[]; liveAccumStrokeId=-1;
   ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,800,500);
   offCtx.fillStyle='#ffffff'; offCtx.fillRect(0,0,800,500);
   completedStrokes=[];
@@ -1465,10 +1466,55 @@ function resetCanvas(){
   });
 }
 
-let liveSendTimer=0;
 let lastSentIdx=0;
 let currentStrokeId=0;
 let liveAccumPts=[], liveAccumColor='#000', liveAccumSize=7, liveAccumStrokeId=-1;
+let liveDirty=false, liveRafId=null;
+let senderRafId=null, senderPending=false;
+
+function startLiveRaf(){
+  if(liveRafId) return;
+  function frame(){
+    if(liveDirty){
+      liveDirty=false;
+      ctx.drawImage(offscreen,0,0);
+      if(liveAccumPts.length>1){
+        drawStrokeToCtx(ctx,{color:liveAccumColor,size:liveAccumSize,points:liveAccumPts});
+      }
+    }
+    liveRafId=requestAnimationFrame(frame);
+  }
+  liveRafId=requestAnimationFrame(frame);
+}
+
+function stopLiveRaf(){
+  if(liveRafId){ cancelAnimationFrame(liveRafId); liveRafId=null; }
+  liveDirty=false;
+}
+
+function startSenderLoop(){
+  if(senderRafId) return;
+  let lastSend=0;
+  function tick(ts){
+    if(ts-lastSend>=20 && senderPending){
+      lastSend=ts;
+      senderPending=false;
+      const delta=strokePts.slice(lastSentIdx);
+      lastSentIdx=strokePts.length;
+      if(delta.length>0){
+        roomRef.child('liveStroke').set({color:selColor,size:selSize,delta,sid:currentStrokeId});
+      }
+    }
+    senderRafId=requestAnimationFrame(tick);
+  }
+  senderRafId=requestAnimationFrame(tick);
+}
+
+function stopSenderLoop(){
+  if(senderRafId){ cancelAnimationFrame(senderRafId); senderRafId=null; }
+  senderPending=false;
+}
+
 function drawMove(e){
   if(!isDrawer||!isDrawing) return;
   const p=getPos(e);
@@ -1476,20 +1522,17 @@ function drawMove(e){
   ctx.beginPath(); ctx.moveTo(prev.x,prev.y); ctx.lineTo(p.x,p.y);
   ctx.strokeStyle=selColor; ctx.lineWidth=selSize; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.stroke();
   strokePts.push(p);
-  const now=Date.now();
-  if(now-liveSendTimer>20){
-    liveSendTimer=now;
-    const delta=strokePts.slice(lastSentIdx);
-    lastSentIdx=strokePts.length;
-    if(delta.length>0){
-      roomRef.child('liveStroke').set({color:selColor,size:selSize,delta,sid:currentStrokeId});
-    }
-  }
+  senderPending=true;
 }
 
 async function stopStroke(){
   if(!isDrawer||!isDrawing) return;
   isDrawing=false;
+  // flush any unsent points immediately
+  const delta=strokePts.slice(lastSentIdx);
+  if(delta.length>0){
+    roomRef.child('liveStroke').set({color:selColor,size:selSize,delta,sid:currentStrokeId});
+  }
   if(strokePts.length>0){
     const strokeData={color:selColor,size:selSize,points:strokePts};
     const ref=roomRef.child('strokes').push(strokeData);
