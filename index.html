@@ -486,7 +486,6 @@ const ICONS = {
   medal1: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="14" r="7" fill="#ffd700" stroke="#e5a800"/><path d="M8 3h8l-1.5 5H9.5z" fill="#ffd700" stroke="#e5a800"/><text x="12" y="18.5" text-anchor="middle" font-family="Fredoka One,cursive" font-size="7" fill="#7a5800" stroke="none">1</text></svg>`,
   medal2: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="14" r="7" fill="#c0c0c0" stroke="#909090"/><path d="M8 3h8l-1.5 5H9.5z" fill="#c0c0c0" stroke="#909090"/><text x="12" y="18.5" text-anchor="middle" font-family="Fredoka One,cursive" font-size="7" fill="#444" stroke="none">2</text></svg>`,
   medal3: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="14" r="7" fill="#cd7f32" stroke="#a05a20"/><path d="M8 3h8l-1.5 5H9.5z" fill="#cd7f32" stroke="#a05a20"/><text x="12" y="18.5" text-anchor="middle" font-family="Fredoka One,cursive" font-size="7" fill="#5a2800" stroke="none">3</text></svg>`,
-  // NEW
   pen: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>`,
   fill: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 11L8.93 2.93a1 1 0 0 0-1.41 0L2.93 7.52a1 1 0 0 0 0 1.41L13 19"/><path d="M5 14l4 4"/><path d="M18 21c-1.1 0-2-.9-2-2 0-1.66 2-4 2-4s2 2.34 2 4c0 1.1-.9 2-2 2z" fill="currentColor" stroke="none"/><line x1="2" y1="22" x2="22" y2="22" stroke="currentColor" stroke-width="1.2"/></svg>`,
   undo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>`,
@@ -528,9 +527,6 @@ const COLORS = [
   "#c0392b","#d35400","#27ae60","#2980b9"
 ];
 const SIZES = [{s:3},{s:7},{s:14},{s:24}];
-// ─────────────────────────────
-//  STAŁY CZAS RUNDY: 120 sekund
-// ─────────────────────────────
 const ROUND_SEC = 120;
 
 // ═══════════════════════════════════════════════════
@@ -543,11 +539,8 @@ let myName='', roomCode='', isHost=false, isDrawer=false;
 let currentWord='', gameData={}, players={};
 let gameMode='normal';
 let streamerMode=false;
-// tool state
-let selTool='pen'; // 'pen' | 'fill'
-// undo tracking
+let selTool='pen';
 let myStrokeKeys=[], completedStrokeKeys=[];
-// timer fix — track which startTime is running
 let currentTimerStart=0;
 
 function toggleStreamerMode(on){
@@ -572,7 +565,6 @@ function toggleStreamerMode(on){
   updateLobbyCode();
 }
 
-// ─── Custom word input ───────────────────
 let customWordVisible=false;
 function openCustomWordOverlay(){
   const inp=document.getElementById('custom-word-input');
@@ -617,7 +609,6 @@ function toggleCustomWordVisibility(){
   }
 }
 
-// ─── Word choice context menu ───────────────────────
 let ctxTargetEl=null;
 let ctxWordRevealed=false;
 let longPressTimer=null;
@@ -666,7 +657,6 @@ function ctxAction(){
   else { target.textContent=target.dataset.real; target.dataset.revealed='1'; }
 }
 
-// ─── Drawer word reveal ──────────────────────────────
 let drawerWordRevealed=false;
 let pendingRevealEl=null;
 function revealStreamerWord(el){
@@ -1128,18 +1118,16 @@ function updateUI(d){
   }
 
   renderScores(players);
-  // ─── TIMER FIX: tylko restartuj jeśli nowy roundStartTime ───
   if(d.status==='drawing' && d.roundStartTime && d.roundStartTime !== currentTimerStart){
     runTimer(d.roundStartTime);
   }
 }
 
 // ═══════════════════════════════════════════════════
-//  TIMER — twardy 2 minuty, bez driftu
+//  TIMER
 // ═══════════════════════════════════════════════════
 const ARC_LEN=138.2;
 function runTimer(startTime){
-  // Zatrzymaj poprzedni timer
   if(timerIv) clearInterval(timerIv);
   currentTimerStart = startTime;
 
@@ -1308,14 +1296,12 @@ async function backToMenu(){
 }
 
 // ═══════════════════════════════════════════════════
-//  CANVAS — z offscreen optimization
+//  CANVAS
 // ═══════════════════════════════════════════════════
 const canvas=document.getElementById('game-canvas');
 const ctx=canvas.getContext('2d');
 ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,800,500);
 
-// Offscreen canvas — przechowuje wszystkie ukończone kreski
-// Dzięki temu nie przerysowujemy wszystkiego przy każdym live stroke
 const offscreen=document.createElement('canvas');
 offscreen.width=800; offscreen.height=500;
 const offCtx=offscreen.getContext('2d');
@@ -1326,7 +1312,6 @@ function getPos(e){
   return {x:Math.round((e.clientX-r.left)*(800/r.width)), y:Math.round((e.clientY-r.top)*(500/r.height))};
 }
 
-// Rysuje stroke na podanym kontekście
 function drawStrokeToCtx(targetCtx, st){
   if(!st) return;
   if(st.type==='fill'){
@@ -1345,10 +1330,8 @@ function drawStrokeToCtx(targetCtx, st){
   targetCtx.stroke();
 }
 
-// Convenience wrapper dla main canvas
 function drawStroke(st){ drawStrokeToCtx(ctx, st); }
 
-// Przerysuj offscreen z listy completedStrokes (przy undo / reset)
 function redrawFromOffscreen(){
   offCtx.fillStyle='#ffffff'; offCtx.fillRect(0,0,800,500);
   completedStrokes.forEach(st=>drawStrokeToCtx(offCtx,st));
@@ -1358,6 +1341,8 @@ function redrawFromOffscreen(){
 function setupCanvas(){
   startLiveRaf();
   startSenderLoop();
+
+  // ─── POPRAWKA: mousedown wysyła pierwszy punkt od razu ───
   canvas.addEventListener('mousedown',e=>{
     if(!isDrawer) return;
     if(selTool==='fill'){
@@ -1369,10 +1354,14 @@ function setupCanvas(){
     const p=getPos(e);
     strokePts=[p];
     dotAt(p);
+    senderPending=true; // ← POPRAWKA: wyślij pierwszy punkt natychmiast
   });
+
   canvas.addEventListener('mousemove',drawMove);
   canvas.addEventListener('mouseup',stopStroke);
   canvas.addEventListener('mouseleave',stopStroke);
+
+  // ─── POPRAWKA: touchstart wysyła pierwszy punkt od razu ───
   canvas.addEventListener('touchstart',e=>{
     e.preventDefault();
     if(!isDrawer) return;
@@ -1384,14 +1373,14 @@ function setupCanvas(){
     isDrawing=true;
     const p=getPos(e.touches[0]);
     strokePts=[p]; dotAt(p);
+    senderPending=true; // ← POPRAWKA: wyślij pierwszy punkt natychmiast
   },{passive:false});
+
   canvas.addEventListener('touchmove',e=>{ e.preventDefault(); drawMove(e.touches[0]); },{passive:false});
   canvas.addEventListener('touchend',stopStroke);
 
-  // Ukończone kreski — dodaj do offscreen i main
   roomRef.child('strokes').on('child_added',s=>{
     const st=s.val(); if(!st) return;
-    // Unikaj duplikatów (rysujący już narysował lokalnie)
     if(!completedStrokeKeys.includes(s.key)){
       completedStrokes.push(st);
       completedStrokeKeys.push(s.key);
@@ -1400,7 +1389,6 @@ function setupCanvas(){
     }
   });
 
-  // Usunieta kreska (undo) — przerysuj
   roomRef.child('strokes').on('child_removed',s=>{
     const idx=completedStrokeKeys.indexOf(s.key);
     if(idx!==-1){
@@ -1410,7 +1398,6 @@ function setupCanvas(){
     }
   });
 
-  // Live stroke (podgląd kreski w trakcie rysowania) — tylko dla nie-rysujących
   roomRef.child('liveStroke').on('value',s=>{
     if(isDrawer) return;
     const live=s.val();
@@ -1419,14 +1406,12 @@ function setupCanvas(){
       liveDirty=true;
       return;
     }
-    // nowa kreska — resetuj akumulator
     if(live.sid !== liveAccumStrokeId){
       liveAccumPts=[];
       liveAccumStrokeId=live.sid;
       liveAccumColor=live.color;
       liveAccumSize=live.size;
     }
-    // dorzuć nowe punkty do akumulatora
     if(live.delta && live.delta.length>0){
       liveAccumPts.push(...live.delta);
     }
@@ -1444,7 +1429,6 @@ function resetCanvas(){
   completedStrokeKeys=[];
   myStrokeKeys=[];
   updateUndoBtn();
-  // re-attach strokes listener
   roomRef.child('strokes').off('child_added');
   roomRef.child('strokes').off('child_removed');
   roomRef.child('strokes').on('child_added',s=>{
@@ -1464,6 +1448,8 @@ function resetCanvas(){
       redrawFromOffscreen();
     }
   });
+  startLiveRaf();
+  startSenderLoop();
 }
 
 let lastSentIdx=0;
@@ -1528,7 +1514,6 @@ function drawMove(e){
 async function stopStroke(){
   if(!isDrawer||!isDrawing) return;
   isDrawing=false;
-  // flush any unsent points immediately
   const delta=strokePts.slice(lastSentIdx);
   if(delta.length>0){
     roomRef.child('liveStroke').set({color:selColor,size:selSize,delta,sid:currentStrokeId});
@@ -1537,12 +1522,9 @@ async function stopStroke(){
     const strokeData={color:selColor,size:selSize,points:strokePts};
     const ref=roomRef.child('strokes').push(strokeData);
     const key=ref.key;
-    // Dodaj do własnego trackingu
     myStrokeKeys.push(key);
-    // Dodaj do completedStrokes/Keys żeby nie duplikować na child_added
     completedStrokes.push(strokeData);
     completedStrokeKeys.push(key);
-    // Dorysuj na offscreen
     drawStrokeToCtx(offCtx, strokeData);
     updateUndoBtn();
   }
@@ -1569,7 +1551,6 @@ async function undoLastStroke(){
   const lastKey=myStrokeKeys.pop();
   updateUndoBtn();
   await roomRef.child('strokes/'+lastKey).remove();
-  // Usuń też z localnych list (child_removed to zrobi u innych; u siebie robimy ręcznie)
   const idx=completedStrokeKeys.indexOf(lastKey);
   if(idx!==-1){
     completedStrokes.splice(idx,1);
@@ -1586,10 +1567,8 @@ function updateUndoBtn(){
 // ─── FILL TOOL ───────────────────────────────────────
 async function doFill(x, y){
   if(!isDrawer) return;
-  // Zastosuj lokalnie na main i offscreen
   floodFill(ctx, x, y, selColor);
   floodFill(offCtx, x, y, selColor);
-  // Wyślij do Firebase
   const fillData={type:'fill', x, y, color:selColor};
   const ref=roomRef.child('strokes').push(fillData);
   const key=ref.key;
@@ -1599,7 +1578,7 @@ async function doFill(x, y){
   updateUndoBtn();
 }
 
-// ─── FLOOD FILL (scanline) ─────────────────────────
+// ─── FLOOD FILL ─────────────────────────────────────
 function hexToRgb(hex){
   const r=parseInt(hex.slice(1,3),16);
   const g=parseInt(hex.slice(3,5),16);
@@ -1619,10 +1598,8 @@ function floodFill(targetCtx, startX, startY, fillHex){
   const idx=(startY*W+startX)*4;
   const tr=data[idx], tg=data[idx+1], tb=data[idx+2];
 
-  // Jeśli kolor docelowy to ten sam co wypełnienie — wyjdź
   if(tr===fill[0]&&tg===fill[1]&&tb===fill[2]) return;
 
-  // Tolerancja na antyaliasing przy krawędziach
   const TOL=40;
   function matches(i){
     return Math.abs(data[i]-tr)+Math.abs(data[i+1]-tg)+Math.abs(data[i+2]-tb)<TOL;
@@ -1663,7 +1640,6 @@ function selectTool(tool){
 }
 
 function buildTools(){
-  // ── Paleta kolorów ──────────────────────────────
   const pal=document.getElementById('g-palette'); pal.innerHTML='';
   COLORS.forEach(c=>{
     const d=document.createElement('div'); d.className='c-btn'+(c===selColor?' on':'');
@@ -1673,14 +1649,12 @@ function buildTools(){
       selColor=c;
       document.querySelectorAll('.c-btn').forEach(b=>b.classList.remove('on'));
       d.classList.add('on');
-      // Usuń zaznaczenie custom color
       const cw=document.getElementById('custom-c-btn');
       if(cw) cw.classList.remove('on');
     };
     pal.appendChild(d);
   });
 
-  // Custom color picker
   const customWrap=document.createElement('div');
   customWrap.className='c-custom-wrap';
   customWrap.title='Własny kolor';
@@ -1688,7 +1662,6 @@ function buildTools(){
   customBtn.className='c-btn';
   customBtn.id='custom-c-btn';
   customBtn.style.background=customColorValue;
-  // "+" label
   customBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="3" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
   const colorInput=document.createElement('input');
   colorInput.type='color';
@@ -1710,7 +1683,6 @@ function buildTools(){
   customWrap.appendChild(colorInput);
   pal.appendChild(customWrap);
 
-  // ── Rozmiary ────────────────────────────────────
   const siz=document.getElementById('g-sizes'); siz.innerHTML='';
   SIZES.forEach(({s})=>{
     const d=document.createElement('div'); d.className='s-btn'+(s===selSize?' on':'');
@@ -1721,7 +1693,6 @@ function buildTools(){
     siz.appendChild(d);
   });
 
-  // ── Narzędzia (pisak / wiadro) ──────────────────
   const toolBtns=document.getElementById('g-tool-btns'); toolBtns.innerHTML='';
 
   const penBtn=document.createElement('button');
@@ -1740,7 +1711,6 @@ function buildTools(){
   fillBtn.onclick=()=>selectTool('fill');
   toolBtns.appendChild(fillBtn);
 
-  // Skróty klawiaturowe
   document.addEventListener('keydown',e=>{
     if(!isDrawer) return;
     if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
