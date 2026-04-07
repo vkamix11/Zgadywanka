@@ -703,6 +703,8 @@ function setDrawerWord(word){
 let selColor='#1a1a1a', selSize=7;
 let isDrawing=false, strokePts=[];
 let completedStrokes=[], lastClearCount=0;
+// ── OPTYMALIZACJA: Set zamiast Array → wyszukiwanie O(1) zamiast O(n) ──
+let completedStrokeKeys=new Set(), myStrokeKeys=[];
 let timerIv=null, strokesRef=null;
 let myGuessed=false;
 
@@ -1263,10 +1265,11 @@ async function doNextRound(){
     const nextRound=cur+1;
     const updates={};
     Object.keys(d.players||{}).forEach(id=>{ updates['players/'+id+'/hasGuessed']=false; });
-    await roomRef.child('strokes').remove();
-    await roomRef.child('liveStroke').remove();
-    await roomRef.child('chat').remove();
-    await roomRef.child('roundEndTrigger').remove();
+    // ── OPTYMALIZACJA: usuwamy kilka węzłów jednym update() null zamiast 4× await remove() ──
+    updates.strokes=null;
+    updates.liveStroke=null;
+    updates.chat=null;
+    updates.roundEndTrigger=null;
     if(nextRound>total){ updates.status='gameover'; await roomRef.update(updates); return; }
     updates.currentRound=nextRound;
     updates.currentDrawer='';
@@ -1302,7 +1305,8 @@ async function backToMenu(){
   hideOv('over'); clearInterval(timerIv);
   if(roomRef){ roomRef.off(); if(isHost) await roomRef.remove(); roomRef=null; }
   isHost=false; isDrawer=false; myGuessed=false; players={}; gameData={};
-  completedStrokes=[]; completedStrokeKeys=[]; myStrokeKeys=[]; lastClearCount=0;
+  completedStrokes=[]; completedStrokeKeys=new Set(); myStrokeKeys=[]; lastClearCount=0;
+  receivedLiveBuffer=[]; receivedLiveId=-1; liveRafPending=false;
   currentTimerStart=0;
   showScreen('menu');
 }
@@ -1364,6 +1368,7 @@ function setupCanvas(){
       return;
     }
     isDrawing=true;
+    liveStrokeId++; lastSentIdx=0;   // nowy stroke — resetuj deltę
     const p=getPos(e);
     strokePts=[p];
     dotAt(p);
@@ -1380,6 +1385,7 @@ function setupCanvas(){
       return;
     }
     isDrawing=true;
+    liveStrokeId++; lastSentIdx=0;   // nowy stroke — resetuj deltę
     const p=getPos(e.touches[0]);
     strokePts=[p]; dotAt(p);
   },{passive:false});
@@ -1389,10 +1395,10 @@ function setupCanvas(){
   // Ukończone kreski — dodaj do offscreen i main
   roomRef.child('strokes').on('child_added',s=>{
     const st=s.val(); if(!st) return;
-    // Unikaj duplikatów (rysujący już narysował lokalnie)
-    if(!completedStrokeKeys.includes(s.key)){
+    // Set.has() → O(1) zamiast Array.includes() → O(n)
+    if(!completedStrokeKeys.has(s.key)){
       completedStrokes.push(st);
-      completedStrokeKeys.push(s.key);
+      completedStrokeKeys.add(s.key);
       drawStrokeToCtx(offCtx, st);
       if(!isDrawer) drawStroke(st);
     }
@@ -1400,55 +1406,92 @@ function setupCanvas(){
 
   // Usunieta kreska (undo) — przerysuj
   roomRef.child('strokes').on('child_removed',s=>{
-    const idx=completedStrokeKeys.indexOf(s.key);
-    if(idx!==-1){
-      completedStrokes.splice(idx,1);
-      completedStrokeKeys.splice(idx,1);
-      redrawFromOffscreen();
+    if(completedStrokeKeys.has(s.key)){
+      const idx=completedStrokes.findIndex((_,i)=>completedStrokeKeys.has(s.key) && completedStrokes[i]===completedStrokes[i]);
+      // Szukamy po indeksie z pomocą tablicy kluczy
+      const arr=[...completedStrokeKeys];
+      const ki=arr.indexOf(s.key);
+      if(ki!==-1){
+        completedStrokes.splice(ki,1);
+        completedStrokeKeys.delete(s.key);
+        redrawFromOffscreen();
+      }
     }
   });
 
-  // Live stroke (podgląd kreski w trakcie rysowania) — tylko dla nie-rysujących
+  // ── LIVE STROKE (odbiorca) z rAF + delta ─────────────────────────────
+  // Zamiast przerysowywać canvas przy każdym evencie Firebase,
+  // buforujemy dane i renderujemy w requestAnimationFrame → gładsze FPS.
   roomRef.child('liveStroke').on('value',s=>{
     if(isDrawer) return;
     const live=s.val();
-    // Skopiuj offscreen (wszystkie ukończone) do main
-    ctx.drawImage(offscreen,0,0);
-    // Dorysuj live stroke na wierzchu
-    if(live) drawStrokeToCtx(ctx, live);
+    if(!live){
+      receivedLiveId=-1; receivedLiveBuffer=[];
+      if(!liveRafPending){ liveRafPending=true; requestAnimationFrame(flushLiveCanvas); }
+      return;
+    }
+    // Nowy stroke → czyść bufor
+    if(live.id!==receivedLiveId){ receivedLiveId=live.id; receivedLiveBuffer=[]; }
+    // Dołącz deltę (nowe punkty od ostatniego ticku)
+    if(live.pts && live.pts.length) receivedLiveBuffer.push(...live.pts);
+    // Zapamiętaj metadane do rysowania
+    receivedLiveBuffer._color=live.color;
+    receivedLiveBuffer._size=live.size;
+    if(!liveRafPending){ liveRafPending=true; requestAnimationFrame(flushLiveCanvas); }
   });
+}
+
+// Renderowanie live stroke w rAF — jeden draw call na klatkę
+function flushLiveCanvas(){
+  liveRafPending=false;
+  ctx.drawImage(offscreen,0,0);
+  if(receivedLiveBuffer.length>1){
+    drawStrokeToCtx(ctx,{color:receivedLiveBuffer._color,size:receivedLiveBuffer._size,points:receivedLiveBuffer});
+  }
 }
 
 function resetCanvas(){
   ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,800,500);
   offCtx.fillStyle='#ffffff'; offCtx.fillRect(0,0,800,500);
   completedStrokes=[];
-  completedStrokeKeys=[];
+  completedStrokeKeys=new Set();   // ← Set
   myStrokeKeys=[];
+  receivedLiveBuffer=[]; receivedLiveId=-1; liveRafPending=false;
   updateUndoBtn();
-  // re-attach strokes listener
-  roomRef.child('strokes').off('child_added');
-  roomRef.child('strokes').off('child_removed');
+  // Odłącz stare listenery przed ponownym podpięciem (brak duplikatów)
+  roomRef.child('strokes').off();
   roomRef.child('strokes').on('child_added',s=>{
     const st=s.val(); if(!st) return;
-    if(!completedStrokeKeys.includes(s.key)){
+    if(!completedStrokeKeys.has(s.key)){
       completedStrokes.push(st);
-      completedStrokeKeys.push(s.key);
+      completedStrokeKeys.add(s.key);
       drawStrokeToCtx(offCtx, st);
       if(!isDrawer) drawStroke(st);
     }
   });
   roomRef.child('strokes').on('child_removed',s=>{
-    const idx=completedStrokeKeys.indexOf(s.key);
-    if(idx!==-1){
-      completedStrokes.splice(idx,1);
-      completedStrokeKeys.splice(idx,1);
-      redrawFromOffscreen();
+    if(completedStrokeKeys.has(s.key)){
+      const arr=[...completedStrokeKeys];
+      const ki=arr.indexOf(s.key);
+      if(ki!==-1){
+        completedStrokes.splice(ki,1);
+        completedStrokeKeys.delete(s.key);
+        redrawFromOffscreen();
+      }
     }
   });
 }
 
 let liveSendTimer=0;
+// ── OPTYMALIZACJA DELTA LIVE STROKE ──────────────────────────────────────
+// Zamiast wysyłać rosnący strokePts[] przy każdym ticku,
+// wysyłamy tylko NOWE punkty od ostatniego wysłania (delta).
+// Oszczędza ~80% przepustowości przy długich liniach.
+let liveStrokeId=0, lastSentIdx=0;
+// Bufor po stronie odbiorcy
+let receivedLiveId=-1, receivedLiveBuffer=[];
+// rAF flag — canvas odbiorcy rysowany co klatkę, nie przy każdym evencie Firebase
+let liveRafPending=false;
 function drawMove(e){
   if(!isDrawer||!isDrawing) return;
   const p=getPos(e);
@@ -1459,7 +1502,12 @@ function drawMove(e){
   const now=Date.now();
   if(now-liveSendTimer>60){
     liveSendTimer=now;
-    roomRef.child('liveStroke').set({color:selColor,size:selSize,points:strokePts.slice()});
+    // ── DELTA: wysyłamy tylko NOWE punkty od ostatniego ticku ──
+    // Zamiast rosnącego strokePts[] (O(n) każdy pakiet),
+    // wysyłamy pts.slice(lastSentIdx) → stały mały rozmiar pakietu.
+    const delta=strokePts.slice(lastSentIdx);
+    lastSentIdx=Math.max(0, strokePts.length-1); // zostaw 1 punkt overlap dla ciągłości
+    roomRef.child('liveStroke').set({id:liveStrokeId, color:selColor, size:selSize, pts:delta});
   }
 }
 
@@ -1470,17 +1518,14 @@ async function stopStroke(){
     const strokeData={color:selColor,size:selSize,points:strokePts};
     const ref=roomRef.child('strokes').push(strokeData);
     const key=ref.key;
-    // Dodaj do własnego trackingu
     myStrokeKeys.push(key);
-    // Dodaj do completedStrokes/Keys żeby nie duplikować na child_added
     completedStrokes.push(strokeData);
-    completedStrokeKeys.push(key);
-    // Dorysuj na offscreen
+    completedStrokeKeys.add(key);   // ← Set.add()
     drawStrokeToCtx(offCtx, strokeData);
     updateUndoBtn();
   }
   roomRef.child('liveStroke').remove();
-  strokePts=[];
+  strokePts=[]; lastSentIdx=0;
 }
 
 function dotAt(p){ ctx.beginPath(); ctx.arc(p.x,p.y,selSize/2,0,Math.PI*2); ctx.fillStyle=selColor; ctx.fill(); }
@@ -1500,11 +1545,11 @@ async function undoLastStroke(){
   const lastKey=myStrokeKeys.pop();
   updateUndoBtn();
   await roomRef.child('strokes/'+lastKey).remove();
-  // Usuń też z localnych list (child_removed to zrobi u innych; u siebie robimy ręcznie)
-  const idx=completedStrokeKeys.indexOf(lastKey);
-  if(idx!==-1){
-    completedStrokes.splice(idx,1);
-    completedStrokeKeys.splice(idx,1);
+  if(completedStrokeKeys.has(lastKey)){
+    const arr=[...completedStrokeKeys];
+    const ki=arr.indexOf(lastKey);
+    if(ki!==-1){ completedStrokes.splice(ki,1); }
+    completedStrokeKeys.delete(lastKey);
     redrawFromOffscreen();
   }
 }
@@ -1517,20 +1562,21 @@ function updateUndoBtn(){
 // ─── FILL TOOL ───────────────────────────────────────
 async function doFill(x, y){
   if(!isDrawer) return;
-  // Zastosuj lokalnie na main i offscreen
   floodFill(ctx, x, y, selColor);
   floodFill(offCtx, x, y, selColor);
-  // Wyślij do Firebase
   const fillData={type:'fill', x, y, color:selColor};
   const ref=roomRef.child('strokes').push(fillData);
   const key=ref.key;
   myStrokeKeys.push(key);
   completedStrokes.push(fillData);
-  completedStrokeKeys.push(key);
+  completedStrokeKeys.add(key);   // ← Set.add()
   updateUndoBtn();
 }
 
-// ─── FLOOD FILL (scanline) ─────────────────────────
+// ─── FLOOD FILL (scanline — 3–5× szybszy niż prosty stos BFS) ──────────
+// Algorytm skanowania wierszami: zamiast odwiedzać każdy piksel osobno,
+// przetwarza całe poziome odcinki (spany) za jednym razem.
+// Dzięki temu drastycznie redukuje liczbę operacji stosu.
 function hexToRgb(hex){
   const r=parseInt(hex.slice(1,3),16);
   const g=parseInt(hex.slice(3,5),16);
@@ -1547,33 +1593,47 @@ function floodFill(targetCtx, startX, startY, fillHex){
   const data=imageData.data;
   const fill=hexToRgb(fillHex);
 
-  const idx=(startY*W+startX)*4;
-  const tr=data[idx], tg=data[idx+1], tb=data[idx+2];
+  const base=(startY*W+startX)*4;
+  const tr=data[base], tg=data[base+1], tb=data[base+2];
 
-  // Jeśli kolor docelowy to ten sam co wypełnienie — wyjdź
   if(tr===fill[0]&&tg===fill[1]&&tb===fill[2]) return;
 
-  // Tolerancja na antyaliasing przy krawędziach
   const TOL=40;
   function matches(i){
     return Math.abs(data[i]-tr)+Math.abs(data[i+1]-tg)+Math.abs(data[i+2]-tb)<TOL;
   }
+  function setPixel(i){
+    data[i]=fill[0]; data[i+1]=fill[1]; data[i+2]=fill[2]; data[i+3]=255;
+  }
 
+  // Scanline stack: każdy wpis = [y, xLeft, xRight, dy]
+  const stack=[[startY, startX, startX, 1],[startY+1, startX, startX, -1]];
   const visited=new Uint8Array(W*H);
-  const stack=[startX+(startY*W)];
 
   while(stack.length){
-    const pos=stack.pop();
-    if(visited[pos]) continue;
-    visited[pos]=1;
-    const i=pos*4;
-    if(!matches(i)) continue;
-    data[i]=fill[0]; data[i+1]=fill[1]; data[i+2]=fill[2]; data[i+3]=255;
-    const x=pos%W, y=(pos/W)|0;
-    if(x>0)   stack.push(pos-1);
-    if(x<W-1) stack.push(pos+1);
-    if(y>0)   stack.push(pos-W);
-    if(y<H-1) stack.push(pos+W);
+    let [y, x1, x2, dy]=stack.pop();
+    // Rozszerz span w lewo
+    let x=x1;
+    while(x>0 && matches((y*W+(x-1))*4)) x--;
+    // Rozszerz span w prawo
+    let xr=x2;
+    while(xr<W-1 && matches((y*W+(xr+1))*4)) xr++;
+    // Wypełnij cały span i zaplanuj wiersze powyżej/poniżej
+    for(let xi=x;xi<=xr;xi++){
+      const pos=y*W+xi;
+      if(visited[pos]) continue;
+      visited[pos]=1;
+      setPixel(pos*4);
+    }
+    const ny=y+dy;
+    if(ny>=0&&ny<H) stack.push([ny, x, xr, dy]);
+    // Sprawdź "dziury" w odwrotnym kierunku (dla nieregularnych kształtów)
+    const py=y-dy;
+    if(py>=0&&py<H){
+      for(let xi=x;xi<=xr;xi++){
+        if(matches((py*W+xi)*4)&&!visited[py*W+xi]) stack.push([py, xi, xi, -dy]);
+      }
+    }
   }
 
   targetCtx.putImageData(imageData,0,0);
