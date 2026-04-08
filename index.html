@@ -1847,7 +1847,7 @@ function floodFill(targetCtx, startX, startY, fillHex){
 
   if(tr===fill[0]&&tg===fill[1]&&tb===fill[2]) return;
 
-  const TOL=40;
+  const TOL=10;
   function matches(i){
     return Math.abs(data[i]-tr)+Math.abs(data[i+1]-tg)+Math.abs(data[i+2]-tb)<TOL;
   }
