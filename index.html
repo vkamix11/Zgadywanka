@@ -208,6 +208,14 @@ input[type=password]::placeholder{color:var(--muted);font-weight:600}
 
 /* Fill cursor */
 .canvas-wrap.fill-mode #game-canvas{cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Ctext y='20' font-size='20'%3E🪣%3C/text%3E%3C/svg%3E") 0 20, crosshair}
+/* Eraser cursor */
+.canvas-wrap.eraser-mode #game-canvas{cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Crect x='4' y='8' width='16' height='12' rx='2' fill='%23fff' stroke='%23aaa' stroke-width='1.5'/%3E%3Crect x='4' y='8' width='8' height='12' rx='2' fill='%23f9a8d4'/%3E%3C/svg%3E") 4 20, cell}
+/* Eyedropper cursor */
+.canvas-wrap.eyedropper-mode #game-canvas{cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Ctext y='20' font-size='20'%3E🔍%3C/text%3E%3C/svg%3E") 0 20, crosshair}
+/* Eraser tool on */
+.tool-btn[data-tool=eraser].on{border-color:var(--red);background:rgba(255,77,109,.12)}
+/* Eyedropper tool on */
+.tool-btn[data-tool=eyedropper].on{border-color:var(--purple);background:rgba(199,125,255,.12)}
 /* LAN badge */
 #lan-badge{display:none;align-items:center;gap:5px;background:rgba(6,214,160,.13);border:1px solid rgba(6,214,160,.35);border-radius:8px;padding:4px 10px;font-size:.72rem;font-weight:800;color:var(--green);letter-spacing:.04em;white-space:nowrap}
 #lan-badge .lan-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:lan-pulse 1.6s ease-in-out infinite;will-change:opacity,transform}
@@ -1637,6 +1645,20 @@ function setupCanvas(){
       doFill(p.x, p.y);
       return;
     }
+    if(selTool==='eyedropper'){
+      const p=getPos(e);
+      const px=ctx.getImageData(p.x,p.y,1,1).data;
+      const hex='#'+[px[0],px[1],px[2]].map(v=>v.toString(16).padStart(2,'0')).join('');
+      selColor=hex;
+      // Zaktualizuj podgląd custom color + zaznacz go
+      customColorValue=hex;
+      const customBtn=document.getElementById('custom-c-btn');
+      if(customBtn){ customBtn.style.background=hex; customBtn.innerHTML=''; }
+      document.querySelectorAll('.c-btn').forEach(b=>b.classList.remove('on'));
+      if(customBtn) customBtn.classList.add('on');
+      selectTool('pen');
+      return;
+    }
     isDrawing=true;
     liveStrokeId++; lastSentIdx=0;   // nowy stroke — resetuj deltę
     const p=getPos(e);
@@ -1652,6 +1674,19 @@ function setupCanvas(){
     if(selTool==='fill'){
       const p=getPos(e.touches[0]);
       doFill(p.x,p.y);
+      return;
+    }
+    if(selTool==='eyedropper'){
+      const p=getPos(e.touches[0]);
+      const px=ctx.getImageData(p.x,p.y,1,1).data;
+      const hex='#'+[px[0],px[1],px[2]].map(v=>v.toString(16).padStart(2,'0')).join('');
+      selColor=hex;
+      customColorValue=hex;
+      const customBtn=document.getElementById('custom-c-btn');
+      if(customBtn){ customBtn.style.background=hex; customBtn.innerHTML=''; }
+      document.querySelectorAll('.c-btn').forEach(b=>b.classList.remove('on'));
+      if(customBtn) customBtn.classList.add('on');
+      selectTool('pen');
       return;
     }
     isDrawing=true;
@@ -1750,7 +1785,7 @@ function drawMove(e){
   const p=getPos(e);
   const prev=strokePts[strokePts.length-1];
   ctx.beginPath(); ctx.moveTo(prev.x,prev.y); ctx.lineTo(p.x,p.y);
-  ctx.strokeStyle=selColor; ctx.lineWidth=selSize; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.stroke();
+  ctx.strokeStyle=getDrawColor(); ctx.lineWidth=selSize; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.stroke();
   strokePts.push(p);
   const now=Date.now();
   if(now-liveSendTimer>50){
@@ -1758,8 +1793,8 @@ function drawMove(e){
     // ── DELTA przez Ably — tylko nowe punkty od ostatniego ticku ──
     const delta=strokePts.slice(lastSentIdx);
     lastSentIdx=Math.max(0, strokePts.length-1);
-    ablyPublishLive(delta, selColor, selSize, liveStrokeId);
-    firebasePublishLive([...strokePts], selColor, selSize, liveStrokeId);
+    ablyPublishLive(delta, getDrawColor(), selSize, liveStrokeId);
+    firebasePublishLive([...strokePts], getDrawColor(), selSize, liveStrokeId);
   }
 }
 
@@ -1767,7 +1802,7 @@ async function stopStroke(){
   if(!isDrawer||!isDrawing) return;
   isDrawing=false;
   if(strokePts.length>0){
-    const strokeData={color:selColor,size:selSize,points:strokePts};
+    const strokeData={color:getDrawColor(),size:selSize,points:strokePts};
     const newRef=roomRef.child('strokes').push();
     const key=newRef.key;
     myStrokeKeys.push(key);
@@ -1778,7 +1813,7 @@ async function stopStroke(){
   firebasePublishStopLive();
 }
 
-function dotAt(p){ ctx.beginPath(); ctx.arc(p.x,p.y,selSize/2,0,Math.PI*2); ctx.fillStyle=selColor; ctx.fill(); }
+function dotAt(p){ ctx.beginPath(); ctx.arc(p.x,p.y,selSize/2,0,Math.PI*2); ctx.fillStyle=getDrawColor(); ctx.fill(); }
 
 async function clearCanvas(){
   if(!isDrawer) return;
@@ -1889,9 +1924,14 @@ function selectTool(tool){
   document.querySelectorAll('.tool-btn').forEach(b=>b.classList.toggle('on', b.dataset.tool===tool));
   const wrap=document.getElementById('canvas-wrap');
   if(wrap){
-    wrap.classList.toggle('fill-mode', tool==='fill');
+    wrap.classList.toggle('fill-mode',      tool==='fill');
+    wrap.classList.toggle('eraser-mode',    tool==='eraser');
+    wrap.classList.toggle('eyedropper-mode',tool==='eyedropper');
   }
 }
+
+// Zwraca aktualny kolor rysowania (biały dla gumki)
+function getDrawColor(){ return selTool==='eraser' ? '#ffffff' : selColor; }
 
 function buildTools(){
   // ── Paleta kolorów ──────────────────────────────
@@ -1971,12 +2011,30 @@ function buildTools(){
   fillBtn.onclick=()=>selectTool('fill');
   toolBtns.appendChild(fillBtn);
 
+  const eraserBtn=document.createElement('button');
+  eraserBtn.className='tool-btn';
+  eraserBtn.dataset.tool='eraser';
+  eraserBtn.title='Gumka (E)';
+  eraserBtn.innerHTML=`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H7L3 16l11-11 6 6-2.5 2.5"/><path d="M6.0 11.0 L13 18"/></svg>`;
+  eraserBtn.onclick=()=>selectTool('eraser');
+  toolBtns.appendChild(eraserBtn);
+
+  const eyedropperBtn=document.createElement('button');
+  eyedropperBtn.className='tool-btn';
+  eyedropperBtn.dataset.tool='eyedropper';
+  eyedropperBtn.title='Próbnik koloru (I)';
+  eyedropperBtn.innerHTML=`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 22l4-4m0 0L17 7l-5-5L1 13l5 5z"/><path d="M17 7l3-3a2 2 0 0 1 2.8 2.8L20 10"/><circle cx="7.5" cy="16.5" r=".5" fill="currentColor"/></svg>`;
+  eyedropperBtn.onclick=()=>selectTool('eyedropper');
+  toolBtns.appendChild(eyedropperBtn);
+
   // Skróty klawiaturowe
   document.addEventListener('keydown',e=>{
     if(!isDrawer) return;
     if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
     if(e.key==='p'||e.key==='P') selectTool('pen');
     if(e.key==='f'||e.key==='F') selectTool('fill');
+    if(e.key==='e'||e.key==='E') selectTool('eraser');
+    if(e.key==='i'||e.key==='I') selectTool('eyedropper');
     if((e.ctrlKey||e.metaKey)&&e.key==='z'){ e.preventDefault(); undoLastStroke(); }
   });
 }
