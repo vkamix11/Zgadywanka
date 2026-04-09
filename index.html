@@ -210,12 +210,56 @@ input[type=password]::placeholder{color:var(--muted);font-weight:600}
 .canvas-wrap.fill-mode #game-canvas{cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Ctext y='20' font-size='20'%3E🪣%3C/text%3E%3C/svg%3E") 0 20, crosshair}
 /* Eraser cursor */
 .canvas-wrap.eraser-mode #game-canvas{cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Crect x='4' y='8' width='16' height='12' rx='2' fill='%23fff' stroke='%23aaa' stroke-width='1.5'/%3E%3Crect x='4' y='8' width='8' height='12' rx='2' fill='%23f9a8d4'/%3E%3C/svg%3E") 4 20, cell}
-/* Eyedropper cursor */
-.canvas-wrap.eyedropper-mode #game-canvas{cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Ctext y='20' font-size='20'%3E🔍%3C/text%3E%3C/svg%3E") 0 20, crosshair}
 /* Eraser tool on */
 .tool-btn[data-tool=eraser].on{border-color:var(--red);background:rgba(255,77,109,.12)}
+/* Eyedropper cursor — ukryj systemowy, lupa działa jako kursor */
+.canvas-wrap.eyedropper-mode #game-canvas{cursor:none}
 /* Eyedropper tool on */
 .tool-btn[data-tool=eyedropper].on{border-color:var(--purple);background:rgba(199,125,255,.12)}
+
+/* Eyedropper loupe */
+#eyedropper-loupe{
+  position:fixed;pointer-events:none;z-index:9999;
+  width:156px;height:156px;
+  display:none;
+  transform:translate(-50%,-50%);
+}
+#loupe-ring{
+  position:absolute;inset:0;border-radius:50%;
+  border:3px solid var(--purple);
+  box-shadow:0 0 0 2px rgba(0,0,0,.7),0 8px 28px rgba(0,0,0,.8);
+  overflow:hidden;
+  background:#fff;
+}
+#loupe-canvas{display:block;width:156px;height:156px;image-rendering:pixelated;border-radius:50%}
+/* Crosshair stały na środku lupy */
+#loupe-cross{
+  position:absolute;inset:0;pointer-events:none;
+}
+/* Podgląd koloru */
+#loupe-color{
+  position:absolute;bottom:-28px;left:50%;transform:translateX(-50%);
+  height:20px;min-width:72px;border-radius:10px;
+  border:2px solid rgba(255,255,255,.25);
+  box-shadow:0 2px 8px rgba(0,0,0,.5);
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Nunito',sans-serif;font-size:.72rem;font-weight:800;
+  letter-spacing:.04em;padding:0 8px;
+  color:rgba(255,255,255,.9);text-shadow:0 1px 3px rgba(0,0,0,.9);
+}
+
+/* Custom color always shows "+" via pseudo-element */
+#custom-c-btn{position:relative}
+#custom-c-btn::after{
+  content:'+';
+  position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:900;
+  color:rgba(255,255,255,0.8);
+  pointer-events:none;
+  text-shadow:0 1px 3px rgba(0,0,0,.6);
+  line-height:26px;text-align:center;
+}
 /* LAN badge */
 #lan-badge{display:none;align-items:center;gap:5px;background:rgba(6,214,160,.13);border:1px solid rgba(6,214,160,.35);border-radius:8px;padding:4px 10px;font-size:.72rem;font-weight:800;color:var(--green);letter-spacing:.04em;white-space:nowrap}
 #lan-badge .lan-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:lan-pulse 1.6s ease-in-out infinite;will-change:opacity,transform}
@@ -453,6 +497,20 @@ input[type=password]::placeholder{color:var(--muted);font-weight:600}
 </div>
 
 <!-- ══ CONFIRM REVEAL ══════════════════════════════════ -->
+<!-- Eyedropper loupe -->
+<div id="eyedropper-loupe">
+  <div id="loupe-ring">
+    <canvas id="loupe-canvas" width="156" height="156"></canvas>
+    <svg id="loupe-cross" viewBox="0 0 156 156" xmlns="http://www.w3.org/2000/svg">
+      <!-- crosshair lines -->
+      <line x1="78" y1="0"   x2="78"  y2="156" stroke="rgba(0,0,0,0.45)" stroke-width="1"/>
+      <line x1="0"  y1="78"  x2="156" y2="78"  stroke="rgba(0,0,0,0.45)" stroke-width="1"/>
+      <line x1="78" y1="0"   x2="78"  y2="156" stroke="rgba(255,255,255,0.6)" stroke-width="0.5"/>
+      <line x1="0"  y1="78"  x2="156" y2="78"  stroke="rgba(255,255,255,0.6)" stroke-width="0.5"/>
+    </svg>
+  </div>
+  <div id="loupe-color"></div>
+</div>
 <div id="confirm-reveal">
   <div class="cr-card">
     <h3><span id="ic-warn-reveal"></span> Ujawnić hasło?</h3>
@@ -1653,9 +1711,10 @@ function setupCanvas(){
       // Zaktualizuj podgląd custom color + zaznacz go
       customColorValue=hex;
       const customBtn=document.getElementById('custom-c-btn');
-      if(customBtn){ customBtn.style.background=hex; customBtn.innerHTML=''; }
+      if(customBtn){ customBtn.style.background=hex; }
       document.querySelectorAll('.c-btn').forEach(b=>b.classList.remove('on'));
       if(customBtn) customBtn.classList.add('on');
+      hideLoupe();
       selectTool('pen');
       return;
     }
@@ -1665,9 +1724,16 @@ function setupCanvas(){
     strokePts=[p];
     dotAt(p);
   });
-  canvas.addEventListener('mousemove',drawMove);
+  canvas.addEventListener('mousemove',e=>{
+    if(selTool==='eyedropper' && isDrawer){
+      updateLoupe(e.clientX, e.clientY);
+      return;
+    }
+    hideLoupe();
+    drawMove(e);
+  });
   canvas.addEventListener('mouseup',stopStroke);
-  canvas.addEventListener('mouseleave',stopStroke);
+  canvas.addEventListener('mouseleave',e=>{ hideLoupe(); stopStroke(e); });
   canvas.addEventListener('touchstart',e=>{
     e.preventDefault();
     if(!isDrawer) return;
@@ -1683,7 +1749,7 @@ function setupCanvas(){
       selColor=hex;
       customColorValue=hex;
       const customBtn=document.getElementById('custom-c-btn');
-      if(customBtn){ customBtn.style.background=hex; customBtn.innerHTML=''; }
+      if(customBtn){ customBtn.style.background=hex; }
       document.querySelectorAll('.c-btn').forEach(b=>b.classList.remove('on'));
       if(customBtn) customBtn.classList.add('on');
       selectTool('pen');
@@ -1919,7 +1985,68 @@ function floodFill(targetCtx, startX, startY, fillHex){
 // ═══════════════════════════════════════════════════
 let customColorValue='#ff6b6b';
 
+// ─── EYEDROPPER LOUPE ────────────────────────────────
+function updateLoupe(clientX, clientY){
+  const loupe=document.getElementById('eyedropper-loupe');
+  const loupeCanvas=document.getElementById('loupe-canvas');
+  if(!loupe||!loupeCanvas) return;
+
+  // Canvas internal coords at cursor
+  const r=canvas.getBoundingClientRect();
+  const cx=Math.round((clientX-r.left)*(800/r.width));
+  const cy=Math.round((clientY-r.top)*(500/r.height));
+
+  // Lupa: 13x13 pikseli => 156px (12px/piksel)
+  const ZOOM=12, CELLS=13, HALF=Math.floor(CELLS/2);
+  const SIZE=CELLS*ZOOM; // 156
+  const lctx=loupeCanvas.getContext('2d');
+  lctx.imageSmoothingEnabled=false;
+
+  // Narysuj powiększony fragment canvas
+  lctx.clearRect(0,0,SIZE,SIZE);
+  lctx.drawImage(canvas, cx-HALF, cy-HALF, CELLS, CELLS, 0, 0, SIZE, SIZE);
+
+  // Siatka pikseli
+  lctx.strokeStyle='rgba(0,0,0,0.18)';
+  lctx.lineWidth=0.5;
+  for(let i=0;i<=CELLS;i++){
+    lctx.beginPath(); lctx.moveTo(i*ZOOM,0); lctx.lineTo(i*ZOOM,SIZE); lctx.stroke();
+    lctx.beginPath(); lctx.moveTo(0,i*ZOOM); lctx.lineTo(SIZE,i*ZOOM); lctx.stroke();
+  }
+
+  // Podświetl środkową kratkę
+  lctx.strokeStyle='rgba(199,125,255,1)';
+  lctx.lineWidth=2;
+  lctx.strokeRect(HALF*ZOOM+1, HALF*ZOOM+1, ZOOM-2, ZOOM-2);
+
+  // Kolor centralnego piksela (do podglądu)
+  const px=ctx.getImageData(Math.max(0,Math.min(799,cx)), Math.max(0,Math.min(499,cy)), 1, 1).data;
+  const hex='#'+[px[0],px[1],px[2]].map(v=>v.toString(16).padStart(2,'0')).join('');
+
+  // Podgląd koloru
+  const colorBox=document.getElementById('loupe-color');
+  if(colorBox){
+    colorBox.style.background=hex;
+    colorBox.textContent=hex.toUpperCase();
+    // Kontrast tekstu
+    const lum=(px[0]*299+px[1]*587+px[2]*114)/1000;
+    colorBox.style.color=lum>128?'rgba(0,0,0,0.85)':'rgba(255,255,255,0.95)';
+    colorBox.style.textShadow=lum>128?'none':'0 1px 3px rgba(0,0,0,.8)';
+  }
+
+  // Pozycja lupy — wyśrodkowana dokładnie na kursorze
+  loupe.style.left=clientX+'px';
+  loupe.style.top=clientY+'px';
+  loupe.style.display='block';
+}
+
+function hideLoupe(){
+  const loupe=document.getElementById('eyedropper-loupe');
+  if(loupe) loupe.style.display='none';
+}
+
 function selectTool(tool){
+  if(tool!=='eyedropper') hideLoupe();
   selTool=tool;
   document.querySelectorAll('.tool-btn').forEach(b=>b.classList.toggle('on', b.dataset.tool===tool));
   const wrap=document.getElementById('canvas-wrap');
@@ -1959,8 +2086,7 @@ function buildTools(){
   customBtn.className='c-btn';
   customBtn.id='custom-c-btn';
   customBtn.style.background=customColorValue;
-  // "+" label
-  customBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="3" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
+  // "+" shown via CSS ::after — no innerHTML needed
   const colorInput=document.createElement('input');
   colorInput.type='color';
   colorInput.value=customColorValue;
@@ -1970,7 +2096,6 @@ function buildTools(){
     selColor=customColorValue;
     document.querySelectorAll('.c-btn').forEach(b=>b.classList.remove('on'));
     customBtn.classList.add('on');
-    customBtn.innerHTML='';
   });
   colorInput.addEventListener('click',()=>{
     selColor=customColorValue;
